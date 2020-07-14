@@ -38,7 +38,12 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::marker::PhantomData;
 use std::rc::Rc;
-use std::sync::mpsc::{self, Receiver, SendError};
+
+#[cfg(not(feature = "crossbeam-channel"))]
+use std::sync::mpsc::{channel, Receiver, SendError, Sender as InnerSender};
+
+#[cfg(feature = "crossbeam-channel")]
+use crossbeam_channel::{unbounded as channel, Receiver, SendError, Sender as InnerSender};
 
 use self::source::{SourceFuncs, new_source, source_get};
 
@@ -62,10 +67,12 @@ struct ChannelData<MSG> {
     receiver: Receiver<MSG>,
 }
 
-/// A wrapper over a `std::sync::mpsc::Sender` to wakeup the glib event loop when sending a
-/// message.
+#[doc = "A wrapper over a"]
+#[cfg_attr(not(feature = "crossbeam-channel"), doc = "`std::sync::mpsc::Sender`")]
+#[cfg_attr(feature = "crossbeam-channel", doc = "`crossbeam_channel::Sender`")]
+#[doc = "to wakeup the glib event loop when sending a message."]
 pub struct Sender<MSG> {
-    sender: mpsc::Sender<MSG>,
+    sender: InnerSender<MSG>,
 }
 
 impl<MSG> Clone for Sender<MSG> {
@@ -95,7 +102,7 @@ pub struct Channel<MSG> {
 impl<MSG> Channel<MSG> {
     /// Create a new channel with a callback that will be called when a message is received.
     pub fn new<CALLBACK: FnMut(MSG) + 'static>(callback: CALLBACK) -> (Self, Sender<MSG>) {
-        let (sender, receiver) = mpsc::channel();
+        let (sender, receiver) = channel();
         let source = new_source(RefCell::new(ChannelData {
             callback: Box::new(callback),
             peeked_value: None,
